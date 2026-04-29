@@ -34,7 +34,8 @@
 
 放不属于页面的业务工具。
 
-- `importWorkbook.ts`: `.xlsx` 解析、字段识别、预览行转换、导入结果生成
+- `importWorkbook.ts`: `.xlsx` 解析、字段识别、预览行转换、导入结果生成的工具
+
 
 ### `src/pages`
 
