@@ -15,6 +15,7 @@ pnpm-debug.log*
 # Local environment files
 .env
 .env.*
+!.env.example
 
 # Personal finance source files
 design/docs/*

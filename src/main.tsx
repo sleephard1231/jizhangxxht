@@ -7,10 +7,14 @@ import { FinanceProvider } from "./store/FinanceStore";
 import "./styles.css";
 
 function AppProviders() {
-  const { userStorageKey } = useAuth();
+  const { currentUser, userStorageKey } = useAuth();
 
   return (
-    <FinanceProvider key={userStorageKey} storageKey={userStorageKey}>
+    <FinanceProvider
+      key={userStorageKey}
+      cloudUserId={currentUser?.id}
+      storageKey={userStorageKey}
+    >
       <App />
     </FinanceProvider>
   );

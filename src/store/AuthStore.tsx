@@ -1,110 +1,159 @@
+import type { User } from "@supabase/supabase-js";
 import {
   createContext,
   type ReactNode,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from "react";
+import {
+  isSupabaseConfigured,
+  requireSupabase,
+  supabase,
+} from "../lib/supabase";
 
-type LocalUser = {
+export type AppUser = {
+  id: string;
   email: string;
-  password: string;
-  createdAt: string;
+  createdAt?: string;
 };
 
+type RegisterResult = "signedIn" | "needsEmailConfirmation";
+
 type AuthContextValue = {
-  currentUser: LocalUser | null;
-  login: (email: string, password: string) => void;
-  logout: () => void;
-  register: (email: string, password: string) => void;
-  requestPasswordReset: (email: string) => void;
+  currentUser: AppUser | null;
+  isAuthReady: boolean;
+  isSupabaseConfigured: boolean;
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
+  register: (email: string, password: string) => Promise<RegisterResult>;
+  requestPasswordReset: (email: string) => Promise<void>;
   userStorageKey: string;
 };
 
-const AUTH_USERS_KEY = "personal-finance-auth-users-v1";
-const AUTH_SESSION_KEY = "personal-finance-auth-session-v1";
 const GUEST_STORAGE_KEY = "personal-finance-web-state-v3";
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [users, setUsers] = useState<LocalUser[]>(loadUsers);
-  const [currentEmail, setCurrentEmail] = useState(loadSessionEmail);
-  const currentUser = users.find((user) => user.email === currentEmail) ?? null;
+  const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
+  const [isAuthReady, setIsAuthReady] = useState(!isSupabaseConfigured);
   const userStorageKey = currentUser
-    ? `${GUEST_STORAGE_KEY}:user:${encodeURIComponent(currentUser.email)}`
+    ? `${GUEST_STORAGE_KEY}:supabase:${currentUser.id}`
     : GUEST_STORAGE_KEY;
 
-  function persistUsers(nextUsers: LocalUser[]) {
-    setUsers(nextUsers);
-    localStorage.setItem(AUTH_USERS_KEY, JSON.stringify(nextUsers));
-  }
+  useEffect(() => {
+    if (!supabase) {
+      return;
+    }
 
-  function persistSession(email: string) {
-    setCurrentEmail(email);
-    localStorage.setItem(AUTH_SESSION_KEY, email);
-  }
+    let isMounted = true;
 
-  function register(email: string, password: string) {
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!isMounted) {
+        return;
+      }
+
+      if (error) {
+        console.error("读取 Supabase 登录状态失败：", error);
+      }
+
+      setCurrentUser(toAppUser(data.session?.user ?? null));
+      setIsAuthReady(true);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setCurrentUser(toAppUser(session?.user ?? null));
+      setIsAuthReady(true);
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  async function register(email: string, password: string) {
     const normalizedEmail = normalizeEmail(email);
 
     validateCredentials(normalizedEmail, password);
 
-    if (users.some((user) => user.email === normalizedEmail)) {
-      throw new Error("这个邮箱已经注册过，请直接登录。");
-    }
-
-    const nextUser = {
+    const { data, error } = await requireSupabase().auth.signUp({
       email: normalizedEmail,
       password,
-      createdAt: new Date().toISOString(),
-    };
+    });
 
-    persistUsers([...users, nextUser]);
-    persistSession(normalizedEmail);
+    if (error) {
+      throw new Error(toChineseAuthError(error.message));
+    }
+
+    setCurrentUser(toAppUser(data.session?.user ?? null));
+
+    return data.session ? "signedIn" : "needsEmailConfirmation";
   }
 
-  function login(email: string, password: string) {
+  async function login(email: string, password: string) {
     const normalizedEmail = normalizeEmail(email);
 
     validateCredentials(normalizedEmail, password);
 
-    const matchedUser = users.find((user) => user.email === normalizedEmail);
+    const { data, error } = await requireSupabase().auth.signInWithPassword({
+      email: normalizedEmail,
+      password,
+    });
 
-    if (!matchedUser || matchedUser.password !== password) {
-      throw new Error("邮箱或密码不正确。");
+    if (error) {
+      throw new Error(toChineseAuthError(error.message));
     }
 
-    persistSession(normalizedEmail);
+    setCurrentUser(toAppUser(data.user));
   }
 
-  function logout() {
-    setCurrentEmail("");
-    localStorage.removeItem(AUTH_SESSION_KEY);
+  async function logout() {
+    const { error } = await requireSupabase().auth.signOut();
+
+    if (error) {
+      throw new Error(toChineseAuthError(error.message));
+    }
+
+    setCurrentUser(null);
   }
 
-  function requestPasswordReset(email: string) {
+  async function requestPasswordReset(email: string) {
     const normalizedEmail = normalizeEmail(email);
 
     if (!normalizedEmail) {
       throw new Error("请先填写邮箱。");
     }
 
-    if (!users.some((user) => user.email === normalizedEmail)) {
-      throw new Error("本地没有找到这个邮箱。");
+    if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
+      throw new Error("请输入有效邮箱。");
+    }
+
+    const { error } = await requireSupabase().auth.resetPasswordForEmail(
+      normalizedEmail,
+    );
+
+    if (error) {
+      throw new Error(toChineseAuthError(error.message));
     }
   }
 
   const value = useMemo(
     () => ({
       currentUser,
+      isAuthReady,
+      isSupabaseConfigured,
       login,
       logout,
       register,
       requestPasswordReset,
       userStorageKey,
     }),
-    [currentUser, userStorageKey, users],
+    [currentUser, isAuthReady, userStorageKey],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -120,18 +169,16 @@ export function useAuth() {
   return context;
 }
 
-function loadUsers(): LocalUser[] {
-  try {
-    const saved = localStorage.getItem(AUTH_USERS_KEY);
-
-    return saved ? JSON.parse(saved) : [];
-  } catch {
-    return [];
+function toAppUser(user: User | null): AppUser | null {
+  if (!user?.email) {
+    return null;
   }
-}
 
-function loadSessionEmail() {
-  return localStorage.getItem(AUTH_SESSION_KEY) ?? "";
+  return {
+    id: user.id,
+    email: user.email,
+    createdAt: user.created_at,
+  };
 }
 
 function normalizeEmail(email: string) {
@@ -139,6 +186,12 @@ function normalizeEmail(email: string) {
 }
 
 function validateCredentials(email: string, password: string) {
+  if (!isSupabaseConfigured) {
+    throw new Error(
+      "还没有配置 Supabase。请先复制 .env.example 为 .env.local，然后填写项目 URL 和 anon key。",
+    );
+  }
+
   if (!/^\S+@\S+\.\S+$/.test(email)) {
     throw new Error("请输入有效邮箱。");
   }
@@ -146,4 +199,26 @@ function validateCredentials(email: string, password: string) {
   if (password.length < 6) {
     throw new Error("密码至少需要 6 位。");
   }
+}
+
+function toChineseAuthError(message: string) {
+  const lower = message.toLowerCase();
+
+  if (lower.includes("invalid login credentials")) {
+    return "邮箱或密码不正确。";
+  }
+
+  if (lower.includes("email not confirmed")) {
+    return "这个邮箱还没有完成验证，请先打开邮件里的确认链接。";
+  }
+
+  if (lower.includes("user already registered")) {
+    return "这个邮箱已经注册过，请直接登录。";
+  }
+
+  if (lower.includes("password")) {
+    return "密码不符合要求，请至少使用 6 位字符。";
+  }
+
+  return message || "账号操作失败，请稍后再试。";
 }

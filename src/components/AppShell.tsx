@@ -22,9 +22,16 @@ const navItems = [
 ];
 
 export function AppShell() {
-  const { selectedMonth, setSelectedMonth, transactions } = useFinance();
+  const {
+    cloudSyncError,
+    cloudSyncStatus,
+    selectedMonth,
+    setSelectedMonth,
+    transactions,
+  } = useFinance();
   const { currentUser, logout } = useAuth();
   const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -114,22 +121,33 @@ export function AppShell() {
               {currentUser ? (
                 <>
                   <button type="button" onClick={() => setIsAuthOpen(true)}>
-                    <span>本地账号</span>
+                    <span>{getCloudStatusLabel(cloudSyncStatus, cloudSyncError)}</span>
                     <strong>{currentUser.email}</strong>
                   </button>
-                  <button type="button" onClick={logout}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLogoutError("");
+                      logout().catch((error) =>
+                        setLogoutError(
+                          error instanceof Error ? error.message : "退出失败。",
+                        ),
+                      );
+                    }}
+                  >
                     退出
                   </button>
                 </>
               ) : (
                 <button type="button" onClick={() => setIsAuthOpen(true)}>
-                  <span>访客模式</span>
+                  <span>{cloudSyncStatus === "local" ? "未配置云端" : "访客模式"}</span>
                   <strong>登录 / 注册</strong>
                 </button>
               )}
             </div>
           </div>
         </header>
+        {logoutError ? <p className="topbar-error">{logoutError}</p> : null}
 
         <main className="page-content">
           <Outlet />
@@ -141,13 +159,14 @@ export function AppShell() {
 }
 
 function AuthDialog({ onClose }: { onClose: () => void }) {
-  const { login, register, requestPasswordReset } = useAuth();
+  const { isSupabaseConfigured, login, register, requestPasswordReset } = useAuth();
   const [mode, setMode] = useState<"login" | "register" | "reset">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState<"error" | "success">("success");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   function setError(text: string) {
     setMessage(text);
@@ -159,13 +178,14 @@ function AuthDialog({ onClose }: { onClose: () => void }) {
     setMessageType("success");
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage("");
+    setIsSubmitting(true);
 
     try {
       if (mode === "login") {
-        login(email, password);
+        await login(email, password);
         onClose();
         return;
       }
@@ -176,15 +196,23 @@ function AuthDialog({ onClose }: { onClose: () => void }) {
           return;
         }
 
-        register(email, password);
+        const result = await register(email, password);
+
+        if (result === "needsEmailConfirmation") {
+          setSuccess("注册成功，请打开邮箱里的确认链接，确认后再回来登录。");
+          return;
+        }
+
         onClose();
         return;
       }
 
-      requestPasswordReset(email);
-      setSuccess("后续接邮箱服务后，会向这个邮箱发送重置密码链接。");
+      await requestPasswordReset(email);
+      setSuccess("重置密码邮件已发送，请去邮箱里打开链接继续操作。");
     } catch (error) {
       setError(error instanceof Error ? error.message : "操作失败，请稍后再试。");
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -201,9 +229,9 @@ function AuthDialog({ onClose }: { onClose: () => void }) {
             <p className="eyebrow">账号</p>
             <h3 id="auth-dialog-title">
               {mode === "login"
-                ? "登录本地账本"
+                ? "登录云端账本"
                 : mode === "register"
-                  ? "注册本地账号"
+                  ? "注册云端账号"
                   : "找回密码"}
             </h3>
           </div>
@@ -275,7 +303,9 @@ function AuthDialog({ onClose }: { onClose: () => void }) {
           ) : null}
 
           <p className="auth-hint">
-            这是本地模拟登录：账号和账本都保存在当前浏览器。后续接 Supabase 后，可以升级为真实邮箱验证和云端同步。
+            {isSupabaseConfigured
+              ? "现在使用 Supabase Auth 登录。登录后，交易、分类规则和导入历史会按账号同步到云端。"
+              : "还没有配置 Supabase。请先复制 .env.example 为 .env.local，并填写项目 URL 和 anon key。"}
           </p>
 
           {message ? (
@@ -288,16 +318,46 @@ function AuthDialog({ onClose }: { onClose: () => void }) {
             <button className="button button-secondary" type="button" onClick={onClose}>
               取消
             </button>
-            <button className="button button-primary" type="submit">
+            <button
+              className="button button-primary"
+              disabled={isSubmitting}
+              type="submit"
+            >
               {mode === "login"
-                ? "登录"
+                ? isSubmitting
+                  ? "登录中..."
+                  : "登录"
                 : mode === "register"
-                  ? "创建账号"
-                  : "发送重置邮件"}
+                  ? isSubmitting
+                    ? "创建中..."
+                    : "创建账号"
+                  : isSubmitting
+                    ? "发送中..."
+                    : "发送重置邮件"}
             </button>
           </div>
         </form>
       </div>
     </div>
   );
+}
+
+function getCloudStatusLabel(status: string, error: string) {
+  if (status === "loading") {
+    return "云端读取中";
+  }
+
+  if (status === "syncing") {
+    return "云端同步中";
+  }
+
+  if (status === "synced") {
+    return "云端已同步";
+  }
+
+  if (status === "error") {
+    return error ? "同步异常" : "云端异常";
+  }
+
+  return "云端账号";
 }

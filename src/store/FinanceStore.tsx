@@ -3,7 +3,9 @@ import {
   type ReactNode,
   useContext,
   useEffect,
+  useRef,
   useReducer,
+  useState,
 } from "react";
 import {
   initialCategoryRules,
@@ -11,6 +13,12 @@ import {
   initialTransactions,
 } from "../data";
 import { formatCurrencyPlain } from "../domain/formatters";
+import {
+  loadCloudFinanceState,
+  saveCloudFinanceState,
+  type FinanceSnapshot,
+} from "../lib/financeCloud";
+import { supabase } from "../lib/supabase";
 import type {
   CategoryRule,
   CategorySummary,
@@ -23,16 +31,20 @@ import type {
 import { applyCategoryRulesToTransaction } from "../utils/categoryRules";
 import { hasSameTransactionIdentity } from "../utils/transactionIdentity";
 
-type FinanceState = {
-  selectedMonth: string;
-  transactions: Transaction[];
-  importHistory: ImportBatch[];
-  categoryRules: CategoryRule[];
-};
+type FinanceState = FinanceSnapshot;
+
+type CloudSyncStatus =
+  | "local"
+  | "signedOut"
+  | "loading"
+  | "syncing"
+  | "synced"
+  | "error";
 
 type FinanceAction =
   | { type: "addTransaction"; transaction: Transaction }
   | { type: "commitImport"; transactions: Transaction[]; batch: ImportBatch }
+  | { type: "replaceState"; state: FinanceState }
   | { type: "restoreBackup"; state: FinanceState }
   | { type: "updateTransaction"; id: string; update: TransactionUpdate }
   | { type: "updateTransactions"; ids: string[]; update: TransactionUpdate }
@@ -65,6 +77,8 @@ type FinanceContextValue = FinanceState & {
   restoreBackup: (state: unknown) => void;
   setSelectedMonth: (month: string) => void;
   resetDemoData: () => void;
+  cloudSyncStatus: CloudSyncStatus;
+  cloudSyncError: string;
 };
 
 const STORAGE_KEY = "personal-finance-web-state-v3";
@@ -81,19 +95,122 @@ const FinanceContext = createContext<FinanceContextValue | null>(null);
 export function FinanceProvider({
   children,
   storageKey = STORAGE_KEY,
+  cloudUserId,
 }: {
   children: ReactNode;
   storageKey?: string;
+  cloudUserId?: string;
 }) {
   const [state, dispatch] = useReducer(
     financeReducer,
     storageKey,
     loadInitialState,
   );
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<CloudSyncStatus>(
+    cloudUserId ? "loading" : supabase ? "signedOut" : "local",
+  );
+  const [cloudSyncError, setCloudSyncError] = useState("");
+  const hasLoadedCloudRef = useRef(false);
+  const lastSyncedStateRef = useRef("");
 
   useEffect(() => {
     localStorage.setItem(storageKey, JSON.stringify(state));
   }, [state, storageKey]);
+
+  useEffect(() => {
+    hasLoadedCloudRef.current = false;
+    lastSyncedStateRef.current = "";
+    setCloudSyncError("");
+
+    if (!cloudUserId || !supabase) {
+      setCloudSyncStatus(supabase ? "signedOut" : "local");
+      return;
+    }
+
+    let isCancelled = false;
+
+    setCloudSyncStatus("loading");
+
+    loadCloudFinanceState(supabase, cloudUserId)
+      .then((cloudState) => {
+        if (isCancelled) {
+          return;
+        }
+
+        const localState = loadInitialState(storageKey);
+        const shouldMigrateLocalData =
+          cloudState.transactions.length === 0 &&
+          cloudState.importHistory.length === 0 &&
+          cloudState.categoryRules.length === 0 &&
+          hasMeaningfulLocalData(localState);
+        const nextState = shouldMigrateLocalData
+          ? localState
+          : normalizeLoadedState({
+              ...localState,
+              transactions: cloudState.transactions,
+              importHistory: cloudState.importHistory,
+              categoryRules: cloudState.categoryRules.length
+                ? cloudState.categoryRules
+                : initialCategoryRules,
+            });
+
+        lastSyncedStateRef.current = shouldMigrateLocalData
+          ? ""
+          : JSON.stringify(nextState);
+        hasLoadedCloudRef.current = true;
+        dispatch({ type: "replaceState", state: nextState });
+        setCloudSyncStatus(shouldMigrateLocalData ? "syncing" : "synced");
+      })
+      .catch((error) => {
+        if (isCancelled) {
+          return;
+        }
+
+        hasLoadedCloudRef.current = true;
+        setCloudSyncStatus("error");
+        setCloudSyncError(
+          error instanceof Error ? error.message : "云端账本读取失败。",
+        );
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [cloudUserId, storageKey]);
+
+  useEffect(() => {
+    if (!cloudUserId || !supabase || !hasLoadedCloudRef.current) {
+      return;
+    }
+
+    const client = supabase;
+    const serializedState = JSON.stringify(state);
+
+    if (serializedState === lastSyncedStateRef.current) {
+      setCloudSyncStatus((status) => (status === "synced" ? status : "synced"));
+
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setCloudSyncStatus("syncing");
+      setCloudSyncError("");
+
+      saveCloudFinanceState(client, cloudUserId, state)
+        .then(() => {
+          lastSyncedStateRef.current = serializedState;
+          setCloudSyncStatus("synced");
+        })
+        .catch((error) => {
+          setCloudSyncStatus("error");
+          setCloudSyncError(
+            error instanceof Error ? error.message : "云端账本保存失败。",
+          );
+        });
+    }, 450);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [cloudUserId, state]);
 
   function addImportedTransactions(
     transactions: Transaction[],
@@ -158,6 +275,8 @@ export function FinanceProvider({
         setSelectedMonth: (month) =>
           dispatch({ type: "setSelectedMonth", month }),
         resetDemoData: () => dispatch({ type: "resetDemoData" }),
+        cloudSyncStatus,
+        cloudSyncError,
       }}
     >
       {children}
@@ -290,6 +409,8 @@ function financeReducer(state: FinanceState, action: FinanceAction): FinanceStat
         transactions: [...action.transactions, ...state.transactions],
         importHistory: [action.batch, ...state.importHistory],
       };
+    case "replaceState":
+      return action.state;
     case "restoreBackup":
       return action.state;
     case "updateTransaction":
@@ -423,6 +544,23 @@ function loadInitialState(storageKey = STORAGE_KEY): FinanceState {
   } catch {
     return initialState;
   }
+}
+
+function hasMeaningfulLocalData(state: FinanceState) {
+  return (
+    state.transactions.length > 0 ||
+    state.importHistory.length > 0 ||
+    state.categoryRules.some(
+      (rule) =>
+        !initialCategoryRules.some(
+          (initialRule) =>
+            initialRule.id === rule.id &&
+            initialRule.keywords === rule.keywords &&
+            initialRule.category === rule.category &&
+            initialRule.kind === rule.kind,
+        ),
+    )
+  );
 }
 
 function normalizeLoadedState(state: FinanceState): FinanceState {

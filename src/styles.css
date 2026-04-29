@@ -239,6 +239,18 @@ button:disabled {
   color: var(--forest);
 }
 
+.topbar-error {
+  margin: -14px 0 18px auto;
+  padding: 8px 12px;
+  width: fit-content;
+  border: 1px solid rgba(190, 72, 56, 0.2);
+  border-radius: 999px;
+  background: rgba(190, 72, 56, 0.08);
+  color: var(--negative);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
 .month-switcher,
 .button,
 .filter-chip,
