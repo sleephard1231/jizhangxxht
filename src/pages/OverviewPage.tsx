@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -30,26 +30,42 @@ import {
 
 const chartColors = ["#24463b", "#4d7d67", "#8ba99a", "#c7a96b", "#c97b63", "#7f6a4c"];
 type CalendarView = "month" | "year";
+type DetailView = "day" | "recent";
 
 export function OverviewPage() {
   const { selectedMonth, transactions } = useFinance();
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [calendarView, setCalendarView] = useState<CalendarView>("month");
+  const [detailView, setDetailView] = useState<DetailView>("day");
+  const [selectedDetailDate, setSelectedDetailDate] = useState(
+    getDefaultDetailDate(selectedMonth),
+  );
   const monthTransactions = filterTransactionsByMonth(transactions, selectedMonth);
   const monthlySummary = buildMonthlySummary(monthTransactions, selectedMonth);
   const monthlyTrend = buildMonthlyTrend(transactions, selectedMonth);
   const categoryBreakdown = buildCategoryBreakdown(monthTransactions);
   const dailyHeatmap = buildDailyHeatmap(monthTransactions, selectedMonth);
   const yearlyHeatmap = buildYearHeatmap(transactions, selectedMonth);
-  const visibleTransactions = selectedCategory
+  const categoryFilteredTransactions = selectedCategory
     ? monthTransactions.filter((item) => item.category === selectedCategory)
     : monthTransactions;
+  const dayTransactions = categoryFilteredTransactions.filter(
+    (item) => item.date === selectedDetailDate,
+  );
+  const visibleTransactions =
+    detailView === "day" ? dayTransactions : categoryFilteredTransactions;
+  const daySummary = buildDaySummary(dayTransactions);
   const spendingBars = categoryBreakdown.slice(0, 6);
   const summaryCards = [
     { label: "净现金流", value: monthlySummary.net, tone: "hero" },
     { label: "收入", value: monthlySummary.income, tone: "positive" },
     { label: "支出", value: monthlySummary.spent, tone: "negative" },
   ] as const;
+
+  useEffect(() => {
+    setSelectedDetailDate(getDefaultDetailDate(selectedMonth));
+    setDetailView("day");
+  }, [selectedMonth]);
 
   function handleExportSummary() {
     const summary = {
@@ -83,6 +99,11 @@ export function OverviewPage() {
     link.download = `finance-summary-${selectedMonth}.json`;
     link.click();
     URL.revokeObjectURL(url);
+  }
+
+  function shiftDetailDate(offset: number) {
+    setSelectedDetailDate((current) => shiftDateWithinMonth(current, selectedMonth, offset));
+    setDetailView("day");
   }
 
   return (
@@ -406,16 +427,93 @@ export function OverviewPage() {
         )}
       </section>
 
-      <section className="table-panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">明细依据</p>
-            <h3>
-              {selectedCategory ? `${selectedCategory}交易` : "最近交易"}
-            </h3>
+      <section className="table-panel overview-detail-panel">
+        <div className="panel-header overview-detail-header">
+          <div className="overview-detail-title">
+            <div className="detail-date-controls" aria-label="切换日期">
+              <button type="button" onClick={() => shiftDetailDate(-1)}>
+                前一天
+              </button>
+              <input
+                aria-label="选择交易日期"
+                max={`${selectedMonth}-${String(getDaysInMonth(selectedMonth)).padStart(2, "0")}`}
+                min={`${selectedMonth}-01`}
+                type="date"
+                value={selectedDetailDate}
+                onChange={(event) => {
+                  setSelectedDetailDate(event.target.value);
+                  setDetailView("day");
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedDetailDate(getDefaultDetailDate(selectedMonth));
+                  setDetailView("day");
+                }}
+              >
+                今天
+              </button>
+              <button type="button" onClick={() => shiftDetailDate(1)}>
+                后一天
+              </button>
+            </div>
+            <div>
+              <p className="eyebrow">明细依据</p>
+              <h3>
+                {detailView === "day"
+                  ? `${formatDateZh(selectedDetailDate)} 当日视图`
+                  : selectedCategory
+                    ? `${selectedCategory}交易`
+                    : "最近交易"}
+              </h3>
+            </div>
           </div>
-          <span className="pill">{visibleTransactions.length} 条</span>
+          <div className="overview-detail-actions">
+            <div className="calendar-view-switch" aria-label="切换明细视图">
+              <button
+                className={detailView === "day" ? "is-active" : ""}
+                type="button"
+                onClick={() => setDetailView("day")}
+              >
+                当日视图
+              </button>
+              <button
+                className={detailView === "recent" ? "is-active" : ""}
+                type="button"
+                onClick={() => setDetailView("recent")}
+              >
+                最近交易
+              </button>
+            </div>
+            <span className="pill">{visibleTransactions.length} 条</span>
+          </div>
         </div>
+
+        {detailView === "day" ? (
+          <div className="summary-strip day-summary-strip">
+            <div className="day-summary-card day-summary-expense">
+              <span>当日支出</span>
+              <strong>{formatCurrencyPlain(daySummary.expense)}</strong>
+            </div>
+            <div className="day-summary-card day-summary-income">
+              <span>当日收入</span>
+              <strong>{formatCurrencyPlain(daySummary.income)}</strong>
+            </div>
+            <div
+              className={`day-summary-card ${
+                daySummary.net >= 0 ? "day-summary-net-positive" : "day-summary-net-negative"
+              }`}
+            >
+              <span>净现金流</span>
+              <strong>{formatCurrencyPlain(daySummary.net)}</strong>
+            </div>
+            <div className="day-summary-card day-summary-count">
+              <span>交易笔数</span>
+              <strong>{daySummary.count}</strong>
+            </div>
+          </div>
+        ) : null}
 
         <div className="data-table">
           <div className="table-row table-head">
@@ -427,7 +525,7 @@ export function OverviewPage() {
             <span>金额</span>
           </div>
 
-          {visibleTransactions.slice(0, 8).map((item) => (
+          {visibleTransactions.slice(0, detailView === "day" ? 20 : 8).map((item) => (
             <div key={item.id} className="table-row">
               <span>{formatDateZh(item.date)}</span>
               <span>{item.merchant}</span>
@@ -441,6 +539,13 @@ export function OverviewPage() {
               </span>
             </div>
           ))}
+          {visibleTransactions.length === 0 ? (
+            <div className="empty-table-state">
+              {detailView === "day"
+                ? "这一天还没有交易记录。"
+                : "当前筛选下还没有交易记录。"}
+            </div>
+          ) : null}
         </div>
       </section>
     </div>
@@ -544,4 +649,71 @@ function buildDailyHeatmap(transactions: Array<{ date: string; amount: number; e
   );
 
   return [...filledDays, ...trailingEmptyDays];
+}
+
+function buildDaySummary(
+  transactions: Array<{
+    amount: number;
+    excludedFromAnalytics?: boolean;
+  }>,
+) {
+  const included = transactions.filter((transaction) => !transaction.excludedFromAnalytics);
+  const income = included
+    .filter((transaction) => transaction.amount > 0)
+    .reduce((sum, transaction) => sum + transaction.amount, 0);
+  const expense = included
+    .filter((transaction) => transaction.amount < 0)
+    .reduce((sum, transaction) => sum + Math.abs(transaction.amount), 0);
+
+  return {
+    count: included.length,
+    expense,
+    income,
+    net: income - expense,
+  };
+}
+
+function getDefaultDetailDate(selectedMonth: string) {
+  const today = new Date();
+  const todayText = [
+    today.getFullYear(),
+    String(today.getMonth() + 1).padStart(2, "0"),
+    String(today.getDate()).padStart(2, "0"),
+  ].join("-");
+
+  if (todayText.startsWith(selectedMonth)) {
+    return todayText;
+  }
+
+  return `${selectedMonth}-${String(getDaysInMonth(selectedMonth)).padStart(2, "0")}`;
+}
+
+function shiftDateWithinMonth(currentDate: string, selectedMonth: string, offset: number) {
+  const [year, month, day] = currentDate.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+
+  date.setDate(date.getDate() + offset);
+
+  const shiftedMonth = [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+  ].join("-");
+
+  if (shiftedMonth !== selectedMonth) {
+    return offset > 0
+      ? `${selectedMonth}-${String(getDaysInMonth(selectedMonth)).padStart(2, "0")}`
+      : `${selectedMonth}-01`;
+  }
+
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function getDaysInMonth(selectedMonth: string) {
+  const [year, month] = selectedMonth.split("-").map(Number);
+
+  return new Date(year, month, 0).getDate();
 }

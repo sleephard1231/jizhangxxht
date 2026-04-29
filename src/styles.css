@@ -689,6 +689,170 @@ button:disabled {
   border-top: 1px solid rgba(22, 33, 29, 0.06);
 }
 
+.overview-detail-panel {
+  gap: 18px;
+}
+
+.overview-detail-header {
+  align-items: flex-start;
+}
+
+.overview-detail-title {
+  display: grid;
+  gap: 16px;
+}
+
+.overview-detail-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.detail-date-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.detail-date-controls button,
+.detail-date-controls input {
+  height: 42px;
+  border: 1px solid rgba(22, 33, 29, 0.08);
+  border-radius: 999px;
+  background: rgba(250, 246, 238, 0.86);
+  color: rgba(22, 33, 29, 0.78);
+  font: inherit;
+  font-weight: 700;
+}
+
+.detail-date-controls button {
+  padding: 0 14px;
+  cursor: pointer;
+}
+
+.detail-date-controls input {
+  min-width: 156px;
+  padding: 0 14px;
+}
+
+.detail-date-controls button:hover {
+  background: rgba(36, 70, 59, 0.1);
+  color: var(--forest);
+}
+
+.day-summary-strip {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.day-summary-strip .day-summary-card {
+  position: relative;
+  isolation: isolate;
+  min-height: 116px;
+  overflow: hidden;
+  border: 1px solid rgba(22, 33, 29, 0.06);
+  background: rgba(255, 252, 247, 0.76);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.day-summary-card::before {
+  content: "";
+  position: absolute;
+  inset: auto 16px 14px auto;
+  z-index: -1;
+  width: 78px;
+  height: 78px;
+  border-radius: 999px;
+  opacity: 0.3;
+  filter: blur(2px);
+}
+
+.day-summary-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  opacity: 0.9;
+}
+
+.day-summary-strip .day-summary-card span {
+  color: rgba(22, 33, 29, 0.62);
+  font-weight: 800;
+}
+
+.day-summary-strip .day-summary-card strong {
+  font-size: clamp(1.45rem, 2vw, 2.1rem);
+  letter-spacing: -0.04em;
+}
+
+.day-summary-expense {
+  color: #6f2f27;
+}
+
+.day-summary-expense::before {
+  background: #b45445;
+}
+
+.day-summary-expense::after {
+  background:
+    linear-gradient(135deg, rgba(180, 84, 69, 0.2), rgba(255, 252, 247, 0.86) 58%),
+    radial-gradient(circle at 8% 12%, rgba(201, 123, 99, 0.16), transparent 34%);
+}
+
+.day-summary-income {
+  color: #1e5f43;
+}
+
+.day-summary-income::before {
+  background: #2f7a58;
+}
+
+.day-summary-income::after {
+  background:
+    linear-gradient(135deg, rgba(47, 122, 88, 0.2), rgba(255, 252, 247, 0.86) 58%),
+    radial-gradient(circle at 8% 12%, rgba(77, 125, 103, 0.16), transparent 34%);
+}
+
+.day-summary-net-positive {
+  color: #214d3b;
+}
+
+.day-summary-net-positive::before {
+  background: #4d7d67;
+}
+
+.day-summary-net-positive::after {
+  background: linear-gradient(135deg, rgba(36, 70, 59, 0.18), rgba(255, 252, 247, 0.86) 58%);
+}
+
+.day-summary-net-negative {
+  color: #7a3a30;
+}
+
+.day-summary-net-negative::before {
+  background: #c97b63;
+}
+
+.day-summary-net-negative::after {
+  background: linear-gradient(135deg, rgba(201, 123, 99, 0.2), rgba(255, 252, 247, 0.86) 58%);
+}
+
+.day-summary-count {
+  color: #765d28;
+}
+
+.day-summary-count::before {
+  background: #c7a96b;
+}
+
+.day-summary-count::after {
+  background:
+    linear-gradient(135deg, rgba(199, 169, 107, 0.22), rgba(255, 252, 247, 0.86) 58%),
+    radial-gradient(circle at 8% 12%, rgba(127, 106, 76, 0.14), transparent 34%);
+}
+
 .table-row-button {
   width: 100%;
   border-right: 0;

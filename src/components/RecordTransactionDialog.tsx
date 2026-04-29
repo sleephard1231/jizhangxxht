@@ -76,14 +76,21 @@ export function RecordTransactionDialog({
 
     const parsedAmount = Number(amount);
 
-    if (!date || !merchant.trim() || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-      setError("请填写日期、商户和大于 0 的金额。");
+    if (!date) {
+      setError("请选择交易日期。");
       return;
     }
 
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      setError("请填写大于 0 的金额。");
+      return;
+    }
+
+    const merchantName = merchant.trim() || getFallbackMerchantName(kind, category);
+
     addTransaction({
       date,
-      merchant: merchant.trim(),
+      merchant: merchantName,
       category,
       account,
       amount: parsedAmount,
@@ -168,9 +175,9 @@ export function RecordTransactionDialog({
               </div>
 
               <label className="select-field">
-                <span>商户 / 来源</span>
+                <span>商户 / 来源（可选）</span>
                 <input
-                  placeholder="例如 美团外卖、工资入账"
+                  placeholder="不填会自动生成，比如餐饮消费"
                   value={merchant}
                   onChange={(event) => setMerchant(event.target.value)}
                 />
@@ -252,4 +259,12 @@ function getDefaultDate(selectedMonth: string) {
   }
 
   return `${selectedMonth}-01`;
+}
+
+function getFallbackMerchantName(kind: TransactionKind, category: string) {
+  if (kind === "income") {
+    return category === "收入" ? "收入入账" : `${category}收入`;
+  }
+
+  return `${category || "其他"}消费`;
 }
