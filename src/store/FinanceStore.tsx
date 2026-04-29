@@ -78,12 +78,22 @@ const initialState: FinanceState = {
 
 const FinanceContext = createContext<FinanceContextValue | null>(null);
 
-export function FinanceProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(financeReducer, undefined, loadInitialState);
+export function FinanceProvider({
+  children,
+  storageKey = STORAGE_KEY,
+}: {
+  children: ReactNode;
+  storageKey?: string;
+}) {
+  const [state, dispatch] = useReducer(
+    financeReducer,
+    storageKey,
+    loadInitialState,
+  );
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [state]);
+    localStorage.setItem(storageKey, JSON.stringify(state));
+  }, [state, storageKey]);
 
   function addImportedTransactions(
     transactions: Transaction[],
@@ -337,7 +347,6 @@ function financeReducer(state: FinanceState, action: FinanceAction): FinanceStat
         selectedMonth: action.month,
       };
     case "resetDemoData":
-      localStorage.removeItem(STORAGE_KEY);
       localStorage.removeItem("personal-finance-web-state-v2");
       localStorage.removeItem("personal-finance-web-state-v1");
       return initialState;
@@ -402,9 +411,9 @@ function getCurrentMonth() {
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function loadInitialState(): FinanceState {
+function loadInitialState(storageKey = STORAGE_KEY): FinanceState {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = localStorage.getItem(storageKey);
 
     if (!saved) {
       return initialState;
